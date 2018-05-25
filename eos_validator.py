@@ -1,4 +1,8 @@
 
+# ATTENTION: the following code is just for demo.
+#  the real script tool in eos_validator/eos_onchain_validator.py
+
+
 # Check the TOKEN amount
 def check_balance(node_host="http://localhost:8888", snapshot_csv="./snapshot.csv", eos_total=1000000000):
     with open(snapshot_csv, 'r') as fp:
