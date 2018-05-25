@@ -7,6 +7,7 @@ import sys
 import time
 import json
 import argparse
+import requests
 import multiprocessing
 
 
@@ -53,8 +54,61 @@ def check_balance(node_host, snapshot_csv):
     return True
 
 
-def check_snapshot():
-    pass
+def fetch_eos_balance(params):
+    eth_addr, snapshot_balance, api_url, count = params
+    url = api_url.format(eth_addr=eth_addr)
+    res = requests.get(url)
+    max_retry = 2
+    while res.ok and max_retry > 0:
+        print('retry request with params:', params)
+        res = requests.get(url)
+        max_retry -= 1
+    if not res.ok:
+        return False
+    onchain_balance = res.json()
+    if abs(float(onchain_balance['balance']) - snapshot_balance) < 0.0001:
+        print count, "valid", snapshot_balance, onchain_balance['balance']
+        return True
+    print count, "INVALID", snapshot_balance, onchain_balance['balance']
+    return False
+
+def check_snapshot(snapshot_csv, api_url):
+    cpu_count = multiprocessing.cpu_count()
+    process_pool = multiprocessing.Pool(processes=cpu_count)
+    count = 1
+    fp = open(snapshot_csv)
+    batch_lines = []
+    try:
+        for line in fp.readlines():
+            account = eval('[%s]' % line)
+            # print account
+            eth_addr = account[0]
+            snapshot_balance = float(account[3])
+            batch_lines.append((eth_addr, snapshot_balance, api_url, count))
+            count += 1
+            if len(batch_lines) < 2*cpu_count:
+                continue
+            # print eth_addr, snapshot_balance
+            print('a', len(batch_lines))
+            results = process_pool.map(fetch_eos_balance, batch_lines, cpu_count)
+            print('a results:', results)
+            if len([r for r in results if not r]) > 0:
+                print('INVALID')
+                return
+            batch_lines = []
+        if batch_lines:
+            print('b', len(batch_lines))
+            results = process_pool.map(fetch_eos_balance, batch_lines, cpu_count)
+            print('b results:', results)
+            if len([r for r in results if not r]) > 0:
+                print('INVALID')
+                return
+    except Exception as e:
+        print 'EXCEPTION: there are exception:', e
+        return False
+    finally:
+        process_pool.close()
+        process_pool.join()
 
 
 def main():
@@ -79,7 +133,7 @@ def main():
         sys.exit(1)
 
     if action == 'snapshot_validate':
-        if not check_snapshot():
+        if not check_snapshot(conf_dict['snapshot_csv'], conf_dict['api_url']):
             print 'ERROR: !!! The Snapshot Check FAILED !!!'
             sys.exit(1)
         else:
